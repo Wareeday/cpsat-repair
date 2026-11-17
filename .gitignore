@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# raw run folders can be large; keep summaries and figures, drop caches
+results/*/llm_cache.jsonl
