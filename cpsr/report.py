@@ -111,7 +111,21 @@ def repair_curve(df: pd.DataFrame) -> tuple[list[int], list[int], int]:
 def repair_table(df: pd.DataFrame) -> str:
     rounds, ks, n = repair_curve(df)
     rows = [[f"after {r} repair round(s)" if r else "round 0 (no repair)", pct(k, n)] for r, k in zip(rounds, ks)]
-    return md_table(["CP-SAT + repair", "Correct (cumulative) [95% CI]"], rows)
+    table = md_table(["CP-SAT + repair", "Correct (cumulative) [95% CI]"], rows)
+    return table + "\n\n" + heldout_sentence(df)
+
+
+def heldout_sentence(df: pd.DataFrame) -> str:
+    """Repaired programs are re-run on a sibling instance (same family and size) the model never saw."""
+    d = cond_df(df, "cpsat_repair")
+    if "heldout" not in d:
+        return "No held-out check was recorded for this run."
+    fixed = d[(d["rounds"] > 0) & d["correct"] & d["heldout"].notna()]
+    if fixed.empty:
+        return "No repaired program had a sibling instance to be checked on."
+    k = int((fixed["heldout"] == "ok").sum())
+    return (f"Of {len(fixed)} programs that were repaired successfully, {k} ({100 * k / len(fixed):.0f}%) also solved "
+            "a sibling instance of the same family and size that the model never saw.")
 
 
 def make_figures(df: pd.DataFrame, out: Path) -> None:

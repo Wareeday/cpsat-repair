@@ -42,21 +42,27 @@ def initial_messages(fam: Family, kind: str) -> list[dict]:
     ]
 
 
-_BLOCK = re.compile(r"```(?:python|py|Python)?[ \t]*\n(.*?)```", re.DOTALL)
+_BLOCK = re.compile(r"```[A-Za-z0-9_+-]*[ \t]*\n(.*?)```", re.DOTALL)
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 def extract_code(reply: str) -> Optional[str]:
+    """Code of the last fenced block that defines solve(). Reasoning models may show drafts first."""
+    reply = _THINK.sub("", reply)
+    if "<think>" in reply.lower():                  # reply was cut off inside the reasoning
+        return None
     blocks = [b.strip("\n") for b in _BLOCK.findall(reply)]
     with_solve = [b for b in blocks if re.search(r"def\s+solve\s*\(", b)]
     if with_solve:
-        return max(with_solve, key=len)
+        return with_solve[-1]
     if re.search(r"^\s*def\s+solve\s*\(", reply, re.MULTILINE) and "```" not in reply:
         return reply
     return None
 
 
 def counterexample_message(fam: Family, data: dict, verdict: Verdict, timeout: float,
-                           ref_objective: Optional[int] = None, reveal_optimum: bool = False) -> str:
+                           ref_objective: Optional[int] = None, reveal_optimum: bool = False,
+                           size_label: str = "") -> str:
     head = "Your program was run on a hidden test instance and it did NOT pass."
     if verdict.status == NO_CODE:
         body = "Your reply did not contain a ```python code block that defines solve(instance)."
@@ -76,7 +82,7 @@ def counterexample_message(fam: Family, data: dict, verdict: Verdict, timeout: f
             body += f" The optimal objective value is {ref_objective}."
     else:
         body = verdict.message
-    parts = [head, "", f"Instance size: {fam.describe(data)}", body]
+    parts = [head, "", f"Instance size: {size_label or fam.describe(data)}", body]
     text = json.dumps(data)
     if len(text) <= 1500:
         parts += ["", f"The instance was: {text}"]

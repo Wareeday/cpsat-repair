@@ -6,7 +6,7 @@ Local model with Ollama:
 Any OpenAI-compatible API (key in an environment variable):
     export OPENAI_API_KEY=...
     python -m cpsr.run --backend openai --base-url https://api.groq.com/openai/v1 \
-        --model llama-3.3-70b-versatile --sleep 2 --out results/llama70b
+        --model openai/gpt-oss-120b --sleep 20 --out results/gptoss120b
 
 Pipeline test without any model:
     python -m cpsr.run --backend mock --mock-mode flaky --out results/mock_test
@@ -23,7 +23,7 @@ import ortools
 
 from . import __version__
 from .generate import DEFAULT_PATH, load_instances
-from .llm import make_backend
+from .llm import BackendError, make_backend
 from .pipeline import Experiment, Settings
 
 
@@ -44,6 +44,11 @@ def main() -> None:
     ap.add_argument("--repair-rounds", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=30.0, help="wall-clock limit per program run (s)")
     ap.add_argument("--mem-mb", type=int, default=4096, help="memory cap per run, POSIX only (0 = none)")
+    ap.add_argument("--max-tokens", type=int, default=4096,
+                    help="cap on the model's reply length (0 = provider default); reasoning tokens count too")
+    ap.add_argument("--no-seed", action="store_true", help="do not send a seed (some providers reject it)")
+    ap.add_argument("--extra-body", default="",
+                    help='extra JSON fields for every request, e.g. \'{"reasoning_effort": "low"}\'')
     ap.add_argument("--sleep", type=float, default=0.0, help="pause after each model call (rate limits)")
     ap.add_argument("--reveal-optimum", action="store_true",
                     help="tell the model the optimal value when its answer is suboptimal (off by default)")
@@ -57,15 +62,21 @@ def main() -> None:
     if not instances:
         sys.exit("no instances selected")
 
-    backend = make_backend(args.backend, args.model, args.base_url, args.api_key_env, args.mock_mode)
+    extra = json.loads(args.extra_body) if args.extra_body else None
+    backend = make_backend(args.backend, args.model, args.base_url, args.api_key_env, args.mock_mode,
+                           max_tokens=args.max_tokens, send_seed=not args.no_seed, extra_body=extra)
     settings = Settings(args.samples, args.temperature, args.repair_rounds, args.timeout,
                         args.mem_mb or None, args.sleep, args.reveal_optimum)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "config.json").write_text(json.dumps({
         "backend": backend.id, "settings": vars(settings), "n_instances": len(instances),
+        "max_tokens": args.max_tokens, "extra_body": extra, "base_url": args.base_url,
         "python": platform.python_version(), "ortools": ortools.__version__, "cpsr": __version__,
     }, indent=2))
-    Experiment(backend, args.out, settings).run(instances)
+    try:
+        Experiment(backend, args.out, settings).run(instances)
+    except BackendError as e:
+        sys.exit(f"\nstopped: {e}\nEverything finished so far is saved. Run the same command again to resume.")
     print(f"finished. Next: python -m cpsr.report --results {args.out}")
 
 

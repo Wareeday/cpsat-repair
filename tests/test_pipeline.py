@@ -9,7 +9,7 @@ from cpsr.pipeline import CONDITIONS, Experiment, Settings
 
 @pytest.fixture(scope="module")
 def instances():
-    rows = build_instances(1, ["knapsack_conflicts", "tsp"], 20, verbose=False)
+    rows = build_instances(2, ["knapsack_conflicts", "tsp"], 20, verbose=False)
     return [r for r in rows if r["size_idx"] <= 2]
 
 
@@ -54,3 +54,12 @@ def test_resume_does_not_duplicate(tmp_path, instances):
     first = run(tmp_path, instances, "flaky", samples=2)
     second = run(tmp_path, instances, "flaky", samples=2)
     assert len(first) == len(second)
+
+
+def test_repaired_programs_are_checked_on_a_sibling_instance(tmp_path, instances):
+    rows = run(tmp_path, instances, "flaky")
+    repaired = [r for r in rows if r["condition"] == "cpsat_repair" and r["rounds"] > 0 and r["status"] == "ok"]
+    assert repaired
+    assert all(r["heldout"] == "ok" for r in repaired)           # the mock's repairs are genuine fixes
+    untouched = [r for r in rows if r["condition"] != "cpsat_repair" or r["rounds"] == 0]
+    assert all(r["heldout"] is None for r in untouched)

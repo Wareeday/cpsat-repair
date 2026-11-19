@@ -36,3 +36,17 @@ def test_extract_code():
     assert extract_code("no code here") is None
     assert extract_code("```python\nprint(1)\n```") is None
     assert extract_code("def solve(instance):\n    return {}") is not None
+
+
+def test_extract_code_takes_last_block_and_ignores_reasoning():
+    draft = "```python\ndef solve(instance):\n    return {'v': 'draft, and it is the longer block'}\n```"
+    final = "```python\ndef solve(instance):\n    return {'v': 1}\n```"
+    assert "'v': 1" in extract_code(f"{draft}\nOn second thought:\n{final}")
+    thinking = f"<think>\n{draft}\n</think>\n{final}"
+    assert "'v': 1" in extract_code(thinking)
+    assert extract_code(f"<think>\n{draft}\n(cut off by the token limit)") is None
+
+
+def test_extract_code_accepts_other_fence_labels():
+    assert extract_code("```python3\ndef solve(instance):\n    return {}\n```") is not None
+    assert extract_code("```\ndef solve(instance):\n    return {}\n```") is not None

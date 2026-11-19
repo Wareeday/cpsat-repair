@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 # raw run folders can be large; keep summaries and figures, drop caches
 results/*/llm_cache.jsonl
+.env

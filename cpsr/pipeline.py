@@ -100,23 +100,37 @@ class Experiment:
         while not verdict.ok and rounds < self.cfg.repair_rounds:
             rounds += 1
             messages.append({"role": "user", "content": counterexample_message(
-                fam, inst["data"], verdict, self.cfg.timeout, inst["ref_objective"], self.cfg.reveal_optimum)})
+                fam, inst["data"], verdict, self.cfg.timeout, inst["ref_objective"], self.cfg.reveal_optimum,
+                inst["size_label"])})
             reply = self._ask(messages, sample, rounds, {"family": fam.name, "kind": "cpsat"})
             messages.append({"role": "assistant", "content": reply})
             code = extract_code(reply)
             verdict, seconds = self._evaluate(fam, code, inst)
             trace.append(verdict.status)
             self._save(fam.name, f"s{sample}_{inst['id']}_repair{rounds}.py", code or "# no code block found\n")
-        return verdict, seconds, rounds, trace
+        return verdict, seconds, rounds, trace, code
+
+    def _heldout(self, fam: Family, code: Optional[str], inst: dict, insts: list[dict]) -> Optional[str]:
+        """Does a repaired program also solve another instance of the same family and size level?
+
+        The counterexample came from `inst`, so passing `inst` again proves little: the model may have
+        patched that one instance. The sibling instance was never shown to the model.
+        """
+        sibling = next((i for i in insts if i["size_idx"] == inst["size_idx"] and i["id"] != inst["id"]), None)
+        if sibling is None:
+            return None
+        verdict, _ = self._evaluate(fam, code, sibling)
+        return verdict.status
 
     def _log(self, inst: dict, sample: int, condition: str, verdict: Verdict, seconds: float,
-             rounds: int = 0, trace: Optional[list] = None) -> None:
+             rounds: int = 0, trace: Optional[list] = None, heldout: Optional[str] = None) -> None:
         row = {
             "id": inst["id"], "family": inst["family"], "size_idx": inst["size_idx"],
             "size_label": inst["size_label"], "sample": sample, "condition": condition,
             "status": verdict.status, "message": verdict.message[:600], "objective": verdict.objective,
             "ref_objective": inst["ref_objective"], "rounds": rounds,
-            "trace": trace or [verdict.status], "seconds": round(seconds, 3), "model": self.backend.id,
+            "trace": trace or [verdict.status], "heldout": heldout,
+            "seconds": round(seconds, 3), "model": self.backend.id,
         }
         with open(self.runs_path, "a") as f:
             f.write(json.dumps(row) + "\n")
@@ -145,7 +159,8 @@ class Experiment:
                         if (inst["id"], sample, "cpsat") not in self.done:
                             self._log(inst, sample, "cpsat", v0, s0)
                         if (inst["id"], sample, "cpsat_repair") not in self.done:
-                            v, s, rounds, trace = self._repair(fam, inst, sample, cp, v0, s0)
-                            self._log(inst, sample, "cpsat_repair", v, s, rounds, trace)
+                            v, s, rounds, trace, final_code = self._repair(fam, inst, sample, cp, v0, s0)
+                            heldout = self._heldout(fam, final_code, inst, insts) if v.ok and rounds else None
+                            self._log(inst, sample, "cpsat_repair", v, s, rounds, trace, heldout)
                     shown = "  ".join(f"{c}={self.last[(inst['id'], sample, c)]}" for c in CONDITIONS)
                     print(f"{inst['id']:28s} sample {sample}  {shown}", flush=True)

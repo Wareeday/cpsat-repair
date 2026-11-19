@@ -14,14 +14,14 @@ import time
 from pathlib import Path
 
 from .families import all_families, get_family
-from .families._cp import solve_reference
+from .families import _cp
 
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "instances.jsonl"
 
 
 def build_instances(per_size: int, families: list[str] | None, time_limit: float, verbose: bool = True) -> list[dict]:
     chosen = [get_family(n) for n in families] if families else all_families()
-    solve_reference.__defaults__ = (time_limit,)
+    _cp.TIME_LIMIT = time_limit
     rows = []
     for fam in chosen:
         for size_idx, size in enumerate(fam.sizes):

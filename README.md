@@ -6,6 +6,8 @@ The LLM reads a plain-English problem statement and writes an [OR-Tools CP-SAT](
 
 I built this as a small, fully free experiment (Python, OR-Tools, any local or free-tier model) around one question I care about: **when an LLM translates a problem into a solver, where does the translation break, and does feedback from a verifier fix it?**
 
+Everything here is open source and free to run: Python, OR-Tools (Apache 2.0), pandas, matplotlib, pytest. There is no external dataset to download or license: the benchmark instances are produced by the generators in this repository. The language model is whatever you point the script at. For a fully open pipeline use a local open-weight model through Ollama; hosted free tiers also serve open-weight models (see the free-tier section), although the hosting itself is a commercial service.
+
 ## What is compared
 
 | Condition | What the model does | Feedback |
@@ -47,13 +49,15 @@ The ground-truth optimum comes from a hand-written CP-SAT model per family (`ref
 
 For satisfaction problems the generator plants a solution first, so every instance is guaranteed to be solvable.
 
+One more check guards against a cheap way to "pass" repair. The counterexample contains the failing instance, so a model could patch that single instance and nothing else. Whenever a repaired program passes, it is run again on a sibling instance (same family and size level, different seed) that the model never saw, and the result is stored as `heldout` and reported.
+
 ## Running it
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m pytest -q                # about a minute
+python -m pytest -q                # 2 to 3 minutes
 ```
 
 The dataset is already in `data/instances.jsonl`. To regenerate it: `python -m cpsr.generate --per-size 2`.
@@ -65,25 +69,40 @@ ollama pull qwen2.5-coder:7b
 python -m cpsr.run --backend ollama --model qwen2.5-coder:7b --out results/qwen7b
 ```
 
-**With a free-tier API** (anything that speaks the OpenAI chat format: Groq, OpenRouter, Gemini's compatibility endpoint, ...):
+**With a free-tier API.** Any provider that speaks the OpenAI chat format works. Check the key, URL and model name first, then run:
 
 ```bash
 export OPENAI_API_KEY=...          # Windows PowerShell: $env:OPENAI_API_KEY="..."
-python -m cpsr.run --backend openai --base-url https://api.groq.com/openai/v1 \
-    --model llama-3.3-70b-versatile --sleep 2 --out results/llama70b
+python -m cpsr.ping --backend openai --base-url https://api.groq.com/openai/v1 --list-models
+python -m cpsr.ping --backend openai --base-url https://api.groq.com/openai/v1 --model openai/gpt-oss-120b
+python -m cpsr.run  --backend openai --base-url https://api.groq.com/openai/v1 \
+    --model openai/gpt-oss-120b --sleep 25 --out results/gptoss120b
 ```
 
 **Then the report:**
 
 ```bash
-python -m cpsr.report --results results/qwen7b --update-readme README.md
+python -m cpsr.report --results results/gptoss120b --update-readme README.md
 ```
 
 This writes the tables and four figures into the run folder and fills in the Results section below.
 
-Useful options: `--samples` (independent programs per family and condition, default 3), `--max-size 3` (only the three smallest size levels, good for a quick trial), `--families tsp,job_shop`, `--temperature`, `--repair-rounds`, `--timeout`. Runs are resumable: model replies are cached in `llm_cache.jsonl`, and finished runs are skipped if you start the same command again.
+Options worth knowing: `--samples` (independent programs per family and condition, default 3), `--max-size 3` (only the three smallest size levels), `--families tsp,job_shop`, `--temperature`, `--repair-rounds`, `--timeout`, `--sleep` (seconds between model calls), `--max-tokens` (cap on reply length, default 4096; reasoning tokens count against it), `--no-seed` (if a provider rejects the seed field) and `--extra-body '{"reasoning_effort": "low"}'` (extra JSON fields for every request, if the provider supports them).
 
-The number of model calls depends on how often the first attempt fails. With 3 samples it is 48 calls for the first programs, plus up to 3 per failing (instance, sample) pair: between about 50 and 770 calls in total.
+### Free tiers
+
+Limits below are what I found in November 2026 in provider documentation as quoted by third-party trackers. They change often and each provider's own console shows the numbers that apply to your account, so check there before a long run.
+
+| Provider | Free limits | Open-weight models | Notes |
+|---|---|---|---|
+| Groq | `openai/gpt-oss-120b`: 30 requests/min, 1,000 requests/day, 8,000 tokens/min, 200,000 tokens/day | gpt-oss-120b, Qwen, others | Very fast. The daily token cap is the bottleneck. No card. |
+| Mistral (free mode) | no card; exact limits only on the console's Limits page (older docs said about 1 request/s and 1 billion tokens/month) | Mistral Small and Devstral Small are open weights; which models the free mode may call is not published | Prompts may be used for training, which does not matter here because the instances are synthetic. Phone verification may be needed. |
+| OpenRouter, `:free` models | 20 requests/min and 50 requests/day (1,000/day after a one-time $10 purchase) | `qwen/qwen3-coder:free`, `openai/gpt-oss-120b:free` | The free roster changes monthly and the daily cap is shared by all free models. |
+| Google Gemini API | free tier with limits that have changed several times | Gemma is open; Gemini is not | Fine for a closed-model comparison, not for an open-source claim. |
+| Cerebras | needs a card; $5 credit that expires after 30 days | gpt-oss-120b, Qwen | Not free in practice. |
+| Ollama (local) | none | any model your machine can run | Slower and weaker with a 7B-8B model, but unlimited and fully open. |
+
+A rough budget, so there are no surprises. Each first program costs about 500 tokens in and several hundred out (more if the model reasons first). A repair call also carries the earlier conversation, so it costs more, roughly 2,500 to 5,000 tokens in total. With the default of 3 samples a run needs 48 first-program calls plus 1 to 3 repair calls for every (instance, sample) pair that fails, so something like 0.5 to 1.5 million tokens depending on how often the model fails. On Groq's 200,000 tokens/day that is several days, not hours. The run is built for that: finished work is saved and cached, and when the daily limit is hit the script stops with a message and continues from the same place when you run the same command the next day. To finish sooner, use `--samples 2`, or `--max-size 4`.
 
 ### Testing the pipeline without a model
 
@@ -93,6 +112,8 @@ The number of model calls depends on how often the first attempt fails. With 3 s
 python -m cpsr.run --backend mock --mock-mode flaky --max-size 2 --out results/mock_test
 ```
 
+The tests also run the real command line against a small fake server that answers in the OpenAI format, with model-style CP-SAT and brute-force programs. No real provider is contacted by the tests.
+
 ## Layout
 
 ```
@@ -100,6 +121,7 @@ cpsr/
   families/        one file per problem family: generator, reference model, checker
   prompts.py       prompts, code extraction, counterexample messages
   llm.py           Ollama / OpenAI-compatible / mock backends and the reply cache
+  ping.py          checks a key, URL and model name before a long run
   sandbox.py       runs generated code in a child process with a time limit
   pipeline.py      the three conditions and the repair loop
   generate.py      builds data/instances.jsonl
@@ -124,13 +146,14 @@ Each run folder keeps every program the model wrote (`programs/<family>/`), incl
 
 ## Limitations
 
-- **Repair is evaluated on the instance that produced the counterexample.** The repaired program is not re-run on other instances. So "repair succeeded" means the model fixed that instance; it does not prove it fixed the general bug. Running repaired programs on held-out instances is the obvious next step.
+- **Repair is judged on the instance that produced the counterexample, plus one sibling.** A repaired program is re-run on one sibling instance of the same family and size, and that rate is reported, but one sibling is a weak test of generality. The counterexample also shows the model the failing instance when it is short, which makes patching that single instance easier.
 - **The baseline gets no feedback.** `python` is one-shot. A fairer and harder baseline would be plain Python with the same repair loop. I left it out to keep the first version small.
 - **Small sample.** 2 instances per size and 3 programs per family and condition. The confidence intervals are Wilson intervals that treat runs as independent, but runs of one program on different instances are correlated, so the intervals are too narrow.
 - **Instance selection.** If the reference CP-SAT model could not prove optimality in 30 s, the instance was discarded and re-drawn (this happened once in the shipped dataset). That biases the set slightly towards instances CP-SAT finds easy.
 - **Shared solver.** The ground truth and the model's answer both rely on CP-SAT. The checkers are independent of it, and the brute-force tests help, but a solver bug would not be caught.
 - **Counterexamples for suboptimal answers** only say that a better solution exists. They do not reveal the optimal value unless you pass `--reveal-optimum`.
 - **The sandbox is a resource guard, not a security boundary.** Generated code runs with your user's permissions. Use a container if you do not trust the model.
+- **Free-tier limits move.** The numbers in the free-tier table are a snapshot. Reasoning models also spend hidden tokens that count towards the limits and towards `--max-tokens`, so a reply can be cut off before the code; such replies are recorded as `no_code`.
 - Results depend on the model, temperature, and prompt wording. I report one model per run folder and do not claim anything beyond it.
 
 ## License
