@@ -1,0 +1,3 @@
+family,sample,instance,status,message,program,my_category
+bin_packing,1,bin_packing-5-1,suboptimal,"valid, objective = 19, but a strictly better solution exists",programs/bin_packing/s1_cpsat.py,
+bin_packing,2,bin_packing-5-1,suboptimal,"valid, objective = 19, but a strictly better solution exists",programs/bin_packing/s2_cpsat.py,
